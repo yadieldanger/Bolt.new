@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Ping Pong Game</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="game-container">
+        <h1>Ping Pong</h1>
+
+        <div class="score-board">
+            <div class="score">
+                <span class="label">Jugador</span>
+                <span id="playerScore">0</span>
+            </div>
+            <div class="score">
+                <span class="label">CPU</span>
+                <span id="cpuScore">0</span>
+            </div>
+        </div>
+
+        <canvas id="gameCanvas" width="800" height="400"></canvas>
+
+        <div class="controls">
+            <button id="startBtn">Iniciar Juego</button>
+            <button id="pauseBtn" disabled>Pausar</button>
+            <button id="resetBtn">Reiniciar</button>
+        </div>
+
+        <div class="instructions">
+            <h3>Controles:</h3>
+            <p>Usa las teclas <strong>W</strong> (arriba) y <strong>S</strong> (abajo) para mover tu paleta</p>
+            <p>También puedes usar las teclas de flecha <strong>↑</strong> y <strong>↓</strong></p>
+            <p>Primer jugador en llegar a 10 puntos gana!</p>
+        </div>
+    </div>
+
+    <script src="game.js"></script>
+</body>
+</html>
