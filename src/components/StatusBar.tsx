@@ -3,6 +3,9 @@ import { Box, Text } from "ink";
 import type { UsageInfo } from "../types.js";
 
 export interface StatusBarProps {
+  /** Short provider label, e.g. "openrouter", "openai". */
+  providerLabel: string;
+  /** Active model id, e.g. "google/gemini-2.0-flash-exp:free" or "gpt-4o-mini". */
   model: string;
   autoApprove: boolean;
   usage: UsageInfo;
@@ -10,7 +13,14 @@ export interface StatusBarProps {
   width: number;
 }
 
-export function StatusBar({ model, autoApprove, usage, cwd, width }: StatusBarProps) {
+export function StatusBar({
+  providerLabel,
+  model,
+  autoApprove,
+  usage,
+  cwd,
+  width,
+}: StatusBarProps) {
   const compactModel = shortenModel(model);
   const cwdShort = shortenPath(cwd, Math.max(8, Math.floor(width * 0.25)));
   const total = usage.total;
@@ -18,8 +28,11 @@ export function StatusBar({ model, autoApprove, usage, cwd, width }: StatusBarPr
 
   const cols = Math.max(40, width);
   const segments = [
-    { color: "green" as const, text: compactModel },
-    { color: (autoApprove ? "red" : "gray") as "red" | "gray", text: autoApprove ? "AUTO" : "ask" },
+    { color: "green" as const, text: `${providerLabel}/${compactModel}` },
+    {
+      color: (autoApprove ? "red" : "gray") as "red" | "gray",
+      text: autoApprove ? "AUTO" : "ask",
+    },
     { color: "blue" as const, text: tokenStr },
     { color: "gray" as const, text: cwdShort },
   ];
@@ -29,7 +42,7 @@ export function StatusBar({ model, autoApprove, usage, cwd, width }: StatusBarPr
       {segments.map((s, i) => (
         <React.Fragment key={i}>
           {i > 0 && <Text color="gray"> · </Text>}
-          <Text color={s.color}>{truncateCell(s.text, Math.max(6, Math.floor(cols / segments.length)))}</Text>
+          <Text color={s.color}>{truncateCell(s.text, Math.max(10, Math.floor(cols / segments.length)))}</Text>
         </React.Fragment>
       ))}
     </Box>
@@ -37,13 +50,32 @@ export function StatusBar({ model, autoApprove, usage, cwd, width }: StatusBarPr
 }
 
 function shortenModel(model: string): string {
-  // "google/gemini-2.0-flash-exp:free" -> "gemini-2.0-flash (free)"
-  const [provider, rest] = model.includes("/") ? model.split("/", 2) : ["", model];
-  const colon = rest?.indexOf(":");
-  const base = colon && colon >= 0 ? rest.slice(0, colon) : rest;
-  const tag = colon && colon >= 0 ? rest.slice(colon + 1) : "";
-  const compact = base && base.length > 22 ? base.slice(0, 22) + "…" : base;
-  return (provider ? `${provider.split("/").pop()}/${compact}` : compact) + (tag ? `:${tag}` : "");
+  // "google/gemini-2.0-flash-exp:free" -> "gemini-2.0-flash:free"
+  const slash = model.indexOf("/");
+  const colon = model.indexOf(":");
+  let core = model;
+  if (slash >= 0) core = core.slice(slash + 1);
+  if (colon > slash + 1 && slash >= 0) {
+    // already handled above (colon is across whole string)
+  }
+  // For "google/gemini-2.0-flash-exp:free" we want "gemini-2.0-flash:free".
+  // We want to drop org prefix and stop at a tag colon.
+  const parts: string[] = [];
+  let p = "";
+  for (let i = 0; i < core.length; i++) {
+    const c = core[i];
+    if (c === ":") {
+      parts.push(p);
+      p = ":";
+      continue;
+    }
+    p += c;
+  }
+  parts.push(p);
+  const base = parts[0] ?? core;
+  const tag = parts.length > 1 ? parts.slice(1).join("") : "";
+  const compact = base.length > 18 ? base.slice(0, 18) + "…" : base;
+  return compact + tag;
 }
 
 function shortenPath(p: string, max: number): string {

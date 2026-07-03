@@ -2,6 +2,8 @@
  * Shared types for the ai-cli agent.
  */
 
+import type { ModelInfo, ProviderMeta } from "./lib/providers.js";
+
 export type Role = "system" | "user" | "assistant" | "tool";
 
 export interface ChatMessage {
@@ -74,8 +76,28 @@ export interface ToolContext {
   hasTermuxApi: boolean;
 }
 
-export interface ResolvedConfig {
+/** Re-export provider catalog types so existing imports keep working. */
+export type { ModelInfo, ProviderMeta };
+
+/** Stored credential for one provider (apiKey only; provider shape lives in providers.ts). */
+export interface ProviderConfig {
   apiKey: string;
+}
+
+export interface ResolvedConfig {
+  /** Active provider id, e.g. "openrouter" or a custom one. */
+  activeProviderId: string;
+  /** Active model id. */
+  activeModel: string;
+  /** Per-provider credentials, keyed by provider id. */
+  providerKeys: Record<string, ProviderConfig>;
+  /** User-added OpenAI-compatible providers beyond the built-in catalogue. */
+  customProviders: ProviderMeta[];
+  /** Resolved apiKey for the active provider (convenience mirror). */
+  apiKey: string;
+  /** Resolved baseUrl for the active provider (convenience mirror). */
+  baseUrl: string;
+  /** Resolved model for the active provider (convenience mirror). */
   model: string;
   autoApprove: boolean;
   systemPrompt: string;

@@ -1,11 +1,21 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Box, Static, Text, useApp, useInput } from "ink";
 import Spinner from "ink-spinner";
-import { OpenRouterClient } from "./lib/openrouter.js";
-import { dispatch as dispatchSlash, type CommandEffect } from "./lib/slash.js";
+import { LlmClient } from "./lib/llm.js";
+import {
+  dispatch as dispatchSlash,
+  type CommandEffect,
+} from "./lib/slash.js";
 import { registerDefaultTools, makeToolContext } from "./lib/tools.js";
-import { estimateTokens, makeId } from "./lib/format.js";
-import { saveConfig } from "./lib/config.js";
+import { makeId } from "./lib/format.js";
+import {
+  saveConfig,
+  setProviderKey as saveProviderKey,
+} from "./lib/config.js";
+import {
+  findProvider,
+  type ProviderMeta,
+} from "./lib/providers.js";
 import type {
   ActiveToolCall,
   ChatMessage,
@@ -13,6 +23,7 @@ import type {
   ToolCall,
   UsageInfo,
 } from "./types.js";
+import type { ProviderConfig } from "./types.js";
 import { InputBox } from "./components/InputBox.js";
 import { StatusBar } from "./components/StatusBar.js";
 import { MessageView } from "./components/MessageView.js";
@@ -20,16 +31,22 @@ import { ApprovalView } from "./components/ApprovalView.js";
 import { StreamingView } from "./components/StreamingView.js";
 
 export interface AppProps {
-  apiKey: string;
+  initialProviderId: string;
   initialModel: string;
+  providerKeys: Record<string, ProviderConfig>;
+  customProviders: ProviderMeta[];
+  initialProviderMeta: ProviderMeta;
   systemPrompt: string;
   cwd: string;
   hasTermuxApi: boolean;
 }
 
 export function App({
-  apiKey,
+  initialProviderId,
   initialModel,
+  providerKeys,
+  customProviders: initialCustomProviders,
+  initialProviderMeta,
   systemPrompt,
   cwd,
   hasTermuxApi,
@@ -37,10 +54,21 @@ export function App({
   const { exit } = useApp();
 
   // ───────── configurable state ─────────
+  const [activeProviderId, setActiveProviderId] = useState(initialProviderId);
   const [model, setModel] = useState(initialModel);
+  const [customProviders, setCustomProviders] = useState<ProviderMeta[]>(
+    initialCustomProviders,
+  );
+  const [providerKeysState, setProviderKeysState] = useState<
+    Record<string, ProviderConfig>
+  >(providerKeys);
   const [autoApprove, setAutoApprove] = useState(false);
   const [systemPromptText, setSystemPromptText] = useState(systemPrompt);
   const [cwdState, setCwdState] = useState(cwd);
+  const [lastListed, setLastListed] = useState<
+    | { providerId: string; modelId: string }[]
+    | undefined
+  >(undefined);
 
   // ───────── chat state ─────────
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -55,7 +83,7 @@ export function App({
   // ───────── approval ─────────
   const [pending, setPending] = useState<ActiveToolCall | null>(null);
 
-  // ───────── reactive refs ─────────
+  // ───────── reactive refs (read by runTurn) ─────────
   const messagesRef = useRef<ChatMessage[]>([]);
   useEffect(() => {
     messagesRef.current = messages;
@@ -83,16 +111,43 @@ export function App({
 
   // Tools/context don't change at runtime.
   const toolDefs = useMemo(() => registerDefaultTools(), []);
-  const ctx = useMemo(() => makeToolContext(cwdRef.current, hasTermuxApi), [hasTermuxApi]);
+  const ctx = useMemo(
+    () => makeToolContext(cwdRef.current, hasTermuxApi),
+    [hasTermuxApi],
+  );
 
-  const clientRef = useRef<OpenRouterClient | null>(null);
-  if (clientRef.current === null && apiKey) {
-    clientRef.current = new OpenRouterClient(apiKey, modelRef.current);
+  // Resolve the currently-active provider (built-in or custom).
+  const activeProvider = useMemo(
+    () =>
+      findProvider(activeProviderId, customProviders) ?? initialProviderMeta,
+    [activeProviderId, customProviders, initialProviderMeta],
+  );
+
+  const activeKey = providerKeysState[activeProvider.id]?.apiKey ?? "";
+
+  // Rebuild the LLM client whenever the active provider or key changes.
+  const clientRef = useRef<LlmClient | null>(null);
+  if (clientRef.current === null && activeKey) {
+    clientRef.current = new LlmClient({
+      apiKey: activeKey,
+      baseUrl: activeProvider.baseUrl,
+      defaultHeaders: activeProvider.defaultHeaders,
+      model: modelRef.current,
+    });
   }
-  // Keep client model in sync with state changes (avoid re-creating client).
+  // Recreate the client when the provider identity changes (different baseUrl or key).
   useEffect(() => {
-    clientRef.current?.setModel(model);
-  }, [clientRef, model]);
+    if (!activeKey) {
+      clientRef.current = null;
+      return;
+    }
+    clientRef.current = new LlmClient({
+      apiKey: activeKey,
+      baseUrl: activeProvider.baseUrl,
+      defaultHeaders: activeProvider.defaultHeaders,
+      model,
+    });
+  }, [activeKey, activeProvider.baseUrl, activeProvider.defaultHeaders, model, activeProvider.id]);
 
   // ───────── streaming buffer ─────────
   const bufferRef = useRef("");
@@ -137,9 +192,104 @@ export function App({
           setMessages([]);
           setErrorMsg(null);
           break;
-        case "setModel":
-          setModel(eff.model);
-          saveConfig({ model: eff.model });
+        case "setActiveProvider": {
+          setActiveProviderId(eff.providerId);
+          const p = findProvider(eff.providerId, customProviders);
+          if (p) {
+            // Reset model to provider default if current model doesn't exist there.
+            if (
+              modelRef.current &&
+              !p.models.some((m) => m.id === modelRef.current)
+            ) {
+              setModel(p.defaultModel);
+            }
+          }
+          saveConfig({
+            providers: providerKeysState,
+            activeProvider: eff.providerId,
+            activeModel:
+              (findProvider(eff.providerId, customProviders)?.models.some(
+                (m) => m.id === modelRef.current,
+              )
+                ? modelRef.current
+                : findProvider(eff.providerId, customProviders)?.defaultModel) ?? "",
+            customProviders,
+          });
+          break;
+        }
+        case "setActiveModel": {
+          setModel(eff.modelId);
+          // If switching to a different provider, also update active provider.
+          if (eff.providerId !== activeProviderId) {
+            setActiveProviderId(eff.providerId);
+          }
+          saveConfig({
+            providers: providerKeysState,
+            activeProvider: eff.providerId,
+            activeModel: eff.modelId,
+            customProviders,
+          });
+          break;
+        }
+        case "setProviderKey": {
+          const next = {
+            ...providerKeysState,
+            [eff.providerId]: { apiKey: eff.apiKey },
+          };
+          setProviderKeysState(next);
+          saveProviderKey(eff.providerId, eff.apiKey);
+          // Auto-activate the provider if there isn't one yet.
+          if (!activeProviderId) {
+            setActiveProviderId(eff.providerId);
+            saveConfig({ activeProvider: eff.providerId });
+          }
+          break;
+        }
+        case "addCustomProvider": {
+          const exists = customProviders.some((p) => p.id === eff.provider.id);
+          const nextCustom = exists
+            ? customProviders.map((p) => (p.id === eff.provider.id ? eff.provider : p))
+            : [...customProviders, eff.provider];
+          setCustomProviders(nextCustom);
+          let nextKeys = providerKeysState;
+          if (eff.apiKey) {
+            nextKeys = {
+              ...providerKeysState,
+              [eff.provider.id]: { apiKey: eff.apiKey },
+            };
+            setProviderKeysState(nextKeys);
+          }
+          saveConfig({
+            customProviders: nextCustom,
+            providers: nextKeys,
+          });
+          break;
+        }
+        case "removeProvider": {
+          const { [eff.providerId]: _removed, ...rest } = providerKeysState;
+          void _removed;
+          setProviderKeysState(rest);
+          // Drop matched custom provider too.
+          const nextCustom = customProviders.filter(
+            (p) => p.id !== eff.providerId,
+          );
+          if (nextCustom.length !== customProviders.length) {
+            setCustomProviders(nextCustom);
+          }
+          saveConfig({
+            providers: rest,
+            customProviders: nextCustom,
+          });
+          // If the removed provider was active, fall back to first configured or empty.
+          if (eff.providerId === activeProviderId) {
+            const fallback = Object.keys(rest)[0] ?? nextCustom[0]?.id ?? "";
+            setActiveProviderId(fallback);
+            saveConfig({ activeProvider: fallback });
+          }
+          break;
+        }
+        case "rememberLastListed":
+          setLastListed(eff.list);
           break;
         case "setAutoApprove":
           setAutoApprove(eff.value);
@@ -154,16 +304,28 @@ export function App({
         case "exit":
           exit();
           break;
+        case "loadSession":
+          // Sessions aren't persisted to disk in this build — surface a notice.
+          setErrorMsg(`session loading not implemented in this build (id=${eff.id}).`);
+          break;
       }
     },
-    [exit],
+    [exit, providerKeysState, customProviders, activeProviderId],
   );
 
   // ───────── agent loop ─────────
   const runTurn = useCallback(async () => {
     if (runningRef.current) return;
     if (!clientRef.current) {
-      setErrorMsg("No API key configured. Set OPENROUTER_API_KEY or save it to ~/.config/ai-cli/config.json. Get a key at https://openrouter.ai/keys");
+      setErrorMsg(
+        `No provider configured. Type /provider to add one (e.g. /provider add openrouter sk-or-v1-...).`,
+      );
+      return;
+    }
+    if (!activeKey) {
+      setErrorMsg(
+        `Active provider "${activeProvider.name}" has no API key. Run /provider show ${activeProvider.id}.`,
+      );
       return;
     }
     runningRef.current = true;
@@ -285,8 +447,6 @@ export function App({
             continue;
           }
 
-          // Tool definition is already resolved at the top of the loop above.
-
           try {
             const result = await def.execute(call.arguments, ctx);
             const truncated =
@@ -323,7 +483,7 @@ export function App({
       runningRef.current = false;
       setMode((m) => (m === "streaming" ? "idle" : m));
     }
-  }, [pushMessage, scheduleFlush, waitForApproval, toolDefs, ctx]);
+  }, [pushMessage, scheduleFlush, waitForApproval, toolDefs, ctx, activeKey, activeProvider]);
 
   const submitUserMessage = useCallback(
     (text: string) => {
@@ -332,7 +492,11 @@ export function App({
 
       if (trimmed.startsWith("/")) {
         const result = dispatchSlash(trimmed, {
-          model,
+          activeProviderId,
+          activeModel: model,
+          providerKeys: providerKeysState,
+          customProviders,
+          lastListed,
           autoApprove,
           systemPrompt: systemPromptText,
         });
@@ -359,7 +523,19 @@ export function App({
       setInput("");
       runTurn();
     },
-    [mode, model, autoApprove, systemPromptText, pushMessage, runTurn, handleEffect],
+    [
+      mode,
+      activeProviderId,
+      model,
+      providerKeysState,
+      customProviders,
+      lastListed,
+      autoApprove,
+      systemPromptText,
+      pushMessage,
+      runTurn,
+      handleEffect,
+    ],
   );
 
   // ───────── global key handling ─────────
@@ -384,13 +560,16 @@ export function App({
   });
 
   // ───────── render ─────────
-  if (!apiKey) {
+  if (!activeKey) {
     return (
       <Box flexDirection="column" paddingX={1}>
-        <Text color="red">✗ OPENROUTER_API_KEY is not set.</Text>
-        <Text>{"  "}Set it in your environment, or save it to ~/.config/ai-cli/config.json:</Text>
-        <Text>{"    "}{`{ "apiKey": "sk-or-..." }`}</Text>
-        <Text>{"\n  "}Get your key at <Text color="cyan">https://openrouter.ai/keys</Text></Text>
+        <Text color="red">✗ No provider API key configured.</Text>
+        <Text>{"  "}Add one at runtime — no manual JSON editing needed:</Text>
+        <Text>{"    "}<Text color="cyan">/provider list</Text>{"            "}see built-in providers</Text>
+        <Text>{"    "}<Text color="cyan">/provider add openrouter sk-or-v1-...</Text></Text>
+        <Text>{"    "}<Text color="cyan">/provider add openai sk-...</Text></Text>
+        <Text>{"    "}<Text color="cyan">/provider add groq gsk_...</Text></Text>
+        <Text>{"\n  "}Then run /provider use openrouter, /model to pick a model.</Text>
         <Text>{"\n  "}Press Ctrl+C to exit.</Text>
       </Box>
     );
@@ -436,6 +615,7 @@ export function App({
       </Box>
 
       <StatusBar
+        providerLabel={activeProvider.label}
         model={model}
         autoApprove={autoApprove}
         usage={tokenUsage}

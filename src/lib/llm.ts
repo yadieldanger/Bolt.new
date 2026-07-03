@@ -1,9 +1,11 @@
 /**
- * OpenRouter streaming client.
+ * Generic OpenAI-compatible streaming client.
  *
- * Backed by the official `openai` Node SDK, pointed at OpenRouter's OpenAI-compatible
- * base URL. The SDK gives us reliable SSE handling and tool-call delta accumulation
- * without rolling our own.
+ * Backed by the official `openai` Node SDK. We pass in the base URL and any
+ * default headers per-provider so this same class works for OpenAI, Groq,
+ * Together, DeepSeek, Mistral, Google (Gemini OpenAI-compat), Perplexity,
+ * Ollama, OpenRouter, and any user-defined custom provider that speaks the
+ * OpenAI chat-completions protocol.
  */
 
 import OpenAI from "openai";
@@ -12,8 +14,11 @@ import type {
   ChatCompletionMessageParam,
   ChatCompletionTool,
 } from "openai/resources/chat/completions.js";
-import type { ChatMessage, Role, ToolCall } from "../types.js";
-import type { ToolDefinition } from "../types.js";
+import type {
+  ChatMessage,
+  ToolCall,
+  ToolDefinition,
+} from "../types.js";
 
 export interface StreamDoneInfo {
   finishReason?: string;
@@ -28,24 +33,34 @@ export interface StreamHandlers {
   onError: (err: Error) => void;
 }
 
-const BASE_URL = "https://openrouter.ai/api/v1";
+export interface LlmClientOptions {
+  /** Per-provider API key. Empty string is allowed for providers with requiresApiKey=false. */
+  apiKey: string;
+  /** OpenAI-compatible base URL for the provider. */
+  baseUrl: string;
+  /** Optional default headers (e.g. HTTP-Referer for OpenRouter ranking). */
+  defaultHeaders?: Record<string, string>;
+  /** Model id to send on every request. */
+  model: string;
+}
 
-export class OpenRouterClient {
+export class LlmClient {
   private client: OpenAI;
   model: string;
 
-  constructor(apiKey: string, model: string) {
+  constructor(opts: LlmClientOptions) {
+    // For providers that don't require an api key (e.g. local Ollama), the SDK
+    // still wants a non-empty string for the Authorization header so we send a
+    // placeholder. The server ignores it.
+    const apiKey = opts.apiKey && opts.apiKey.length > 0 ? opts.apiKey : "no-key";
     this.client = new OpenAI({
       apiKey,
-      baseURL: BASE_URL,
-      defaultHeaders: {
-        "HTTP-Referer": "https://github.com/freebuff/ai-cli",
-        "X-Title": "ai-cli",
-      },
+      baseURL: opts.baseUrl,
+      defaultHeaders: opts.defaultHeaders ?? {},
       maxRetries: 1,
       timeout: 120_000,
     });
-    this.model = model;
+    this.model = opts.model;
   }
 
   setModel(model: string): void {
@@ -229,6 +244,3 @@ function normalizeError(err: unknown): Error {
   }
   return new Error(String(err));
 }
-
-export { BASE_URL };
-export type { Role };

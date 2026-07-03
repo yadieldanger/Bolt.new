@@ -11,8 +11,10 @@ import { cwd as processCwd } from "node:process";
 
 import { App } from "./App.js";
 import { ensureDirs, loadConfig } from "./lib/config.js";
+import { BUILTIN_PROVIDERS, findProvider } from "./lib/providers.js";
 
 interface CliArgs {
+  provider?: string;
   model?: string;
   autoApprove?: boolean;
   printPrompt?: boolean;
@@ -25,6 +27,10 @@ function parseArgs(argv: string[]): CliArgs {
   for (let i = 2; i < argv.length; i++) {
     const a = argv[i];
     switch (a) {
+      case "--provider":
+      case "-P":
+        out.provider = argv[++i];
+        break;
       case "--model":
       case "-m":
         out.model = argv[++i];
@@ -64,21 +70,27 @@ async function main(): Promise<void> {
   if (args.help) {
     process.stdout.write(
       [
-        "ai — OpenRouter-powered CLI agent.",
+        "ai — multi-provider LLM CLI agent.",
         "",
         "Usage:",
-        "  ai                       Start an interactive chat session.",
-        "  ai --model <id>          Start with a specific model override.",
-        "  ai --auto-approve        Skip confirmation prompts for mutating tools.",
-        "  ai --print-config        Print resolved configuration and exit.",
-        "  ai --help                Show this help.",
+        "  ai                                  Start an interactive chat session.",
+        "  ai --provider <id> --model <id>     Override the active provider+model.",
+        "  ai --auto-approve                   Skip confirmation for mutating tools.",
+        "  ai --print-config                   Print resolved configuration and exit.",
+        "  ai --help                           Show this help.",
         "",
         "Inside the chat:",
-        "  /help            Show slash commands.",
-        "  /model [name]    Show or set the model.",
-        "  /auto on|off     Toggle auto-approval at runtime.",
-        "  /clear           Reset the conversation.",
-        "  /quit            Exit.",
+        "  /help                       Show slash commands.",
+        "  /provider                   List & configure providers.",
+        "  /model [name|provider/name] Show or set the model.",
+        "  /auto on|off                Toggle auto-approval.",
+        "  /clear                      Reset the conversation.",
+        "  /quit                       Exit.",
+        "",
+        "Set up a provider first:",
+        "  /provider add openrouter sk-or-v1-...",
+        "  /provider use openrouter",
+        "  /model",
         "",
       ].join("\n"),
     );
@@ -87,6 +99,7 @@ async function main(): Promise<void> {
 
   ensureDirs();
   const cfg = loadConfig({
+    provider: args.provider,
     model: args.model,
     autoApprove: args.autoApprove,
   });
@@ -96,27 +109,35 @@ async function main(): Promise<void> {
     return;
   }
 
-  if (!cfg.apiKey) {
+  if (!cfg.activeProviderId || !cfg.apiKey) {
     process.stderr.write(
-      "✗ OPENROUTER_API_KEY not set.\n" +
-        "  Set it as an environment variable, or save it to:\n" +
-        `    ${cfg.configPath}\n` +
-        "  Visit https://openrouter.ai/keys and paste your key starting with sk-or-...\n\n",
+      "✗ No provider / API key configured.\n" +
+        "  Run inside the chat:\n" +
+        "    /provider list                       see built-in providers\n" +
+        "    /provider add <id> <key>             register e.g. openrouter, openai, groq\n" +
+        "    /provider use <id>                   activate\n" +
+        "    /model                               pick a model\n" +
+        `  Config file: ${cfg.configPath}\n\n`,
     );
   }
 
+  const initialProviderMeta =
+    findProvider(cfg.activeProviderId, cfg.customProviders) ??
+    BUILTIN_PROVIDERS[0];
   const cwd = resolve(processCwd());
   const tui = (
     <App
-      apiKey={cfg.apiKey}
+      initialProviderId={cfg.activeProviderId}
       initialModel={cfg.model}
+      providerKeys={cfg.providerKeys}
+      customProviders={cfg.customProviders}
+      initialProviderMeta={initialProviderMeta}
       systemPrompt={cfg.systemPrompt}
       cwd={cwd}
       hasTermuxApi={hasTermuxApi()}
     />
   );
 
-  // Cleanly unmount on SIGINT — Ink handles resize already.
   const { unmount, waitUntilExit } = render(tui, { exitOnCtrlC: false });
   process.on("SIGTERM", () => unmount());
   await waitUntilExit();
@@ -127,5 +148,4 @@ main().catch((err) => {
   process.exit(1);
 });
 
-// Hush unused import warning on builds where the env tweak is dynamically used.
 void existsSync;
