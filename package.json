@@ -1,9 +1,21 @@
 {
-  "name": "ai-cli",
+  "name": "@yadieldanger/ai-cli",
   "version": "0.1.0",
-  "description": "A complete AI agent CLI optimized for Termux/mobile with OpenRouter streaming and tool calling.",
+  "description": "Multi-provider AI agent CLI for the terminal, optimized for mobile (Termux) and powered by any OpenAI-compatible API (OpenRouter, OpenAI, Groq, Together, DeepSeek, Mistral, Gemini, Perplexity, Ollama). Streams responses token-by-token with tool calling.",
   "type": "module",
   "license": "MIT",
+  "author": "yadieldanger",
+  "homepage": "https://github.com/yadieldanger/Bolt.new#readme",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/yadieldanger/Bolt.new.git"
+  },
+  "bugs": {
+    "url": "https://github.com/yadieldanger/Bolt.new/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "engines": {
     "node": ">=18.0.0"
   },
@@ -16,6 +28,7 @@
     "README.md"
   ],
   "scripts": {
+    "prepublishOnly": "npm run build",
     "build": "tsc && chmod +x bin/ai.js",
     "prepare": "node -e \"try{require('fs').statSync('src')}catch(e){process.exit(0)};require('child_process').execSync('npm run build',{stdio:'inherit'})\"",
     "dev": "tsc --watch",

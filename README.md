@@ -42,11 +42,31 @@ Most AI CLIs assume a desktop terminal and write to ~120 columns. This one is bu
 - **Cancel a stream** with `Ctrl+C` (returns to idle).
 - **Pure JS, ESM, Node 18+** — no native compilation, fast Termux install.
 
+## Install
+
+**From npm (once published):**
+
+```sh
+npm install -g @yadieldanger/ai-cli
+ai
+```
+
+**From source:**
+
+```sh
+git clone https://github.com/yadieldanger/Bolt.new.git ai-cli
+cd ai-cli
+npm install            # build runs automatically via the prepare hook
+./bin/ai.js
+# or, with link so `ai` works from anywhere:
+npm link && ai
+```
+
 ## Quick start (Termux)
 
 ```sh
 pkg install nodejs git
-git clone <this-repo> ai-cli
+git clone https://github.com/yadieldanger/Bolt.new.git ai-cli
 cd ai-cli
 npm install            # build runs automatically via the prepare hook
 ./bin/ai.js
