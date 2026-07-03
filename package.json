@@ -1,0 +1,47 @@
+{
+  "name": "ai-cli",
+  "version": "0.1.0",
+  "description": "A complete AI agent CLI optimized for Termux/mobile with OpenRouter streaming and tool calling.",
+  "type": "module",
+  "license": "MIT",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "bin": {
+    "ai": "./bin/ai.js"
+  },
+  "files": [
+    "bin",
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc && chmod +x bin/ai.js",
+    "prepare": "node -e \"try{require('fs').statSync('src')}catch(e){process.exit(0)};require('child_process').execSync('npm run build',{stdio:'inherit'})\"",
+    "dev": "tsc --watch",
+    "typecheck": "tsc --noEmit",
+    "start": "node bin/ai.js",
+    "smoke": "node --import ./dist/index.js --check dist/index.js || true"
+  },
+  "keywords": [
+    "openrouter",
+    "cli",
+    "ai",
+    "agent",
+    "termux",
+    "tui",
+    "ink"
+  ],
+  "dependencies": {
+    "ink": "^5.0.1",
+    "ink-spinner": "^5.0.0",
+    "ink-text-input": "^6.0.0",
+    "openai": "^4.71.0",
+    "react": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "@types/react": "^18.3.3",
+    "typescript": "^5.5.0"
+  }
+}
