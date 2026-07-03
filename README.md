@@ -47,7 +47,7 @@ Most AI CLIs assume a desktop terminal and write to ~120 columns. This one is bu
 **From npm (once published):**
 
 ```sh
-npm install -g @yadieldanger/ai-cli
+npm install -g @admin_0513/ai-cli
 ai
 ```
 

@@ -1,5 +1,5 @@
 {
-  "name": "@yadieldanger/ai-cli",
+  "name": "@admin_0513/ai-cli",
   "version": "0.1.0",
   "description": "Multi-provider AI agent CLI for the terminal, optimized for mobile (Termux) and powered by any OpenAI-compatible API (OpenRouter, OpenAI, Groq, Together, DeepSeek, Mistral, Gemini, Perplexity, Ollama). Streams responses token-by-token with tool calling.",
   "type": "module",
